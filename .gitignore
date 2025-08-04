@@ -6,3 +6,7 @@ prompt.txt
 lvenv/
 __pycache__/
 *.pyc
+wvenv/
+Mockup/
+googleCredentials.json
+another_sts.py

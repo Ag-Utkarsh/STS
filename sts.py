@@ -3,79 +3,74 @@ import threading
 import sounddevice as sd
 import numpy as np
 from dotenv import load_dotenv
-from deepgram import DeepgramClient, LiveTranscriptionEvents, LiveOptions
 from openai import OpenAI
-from elevenlabs import play, stream
+from elevenlabs import stream
 from elevenlabs.client import ElevenLabs
+import queue
+import re
+from google.cloud import speech
+import pyaudio
 
 # Load environment variables
 load_dotenv()
+os.environ["PATH"] += os.pathsep + r"C:\Users\Chotu chapri\Downloads\mpv-x86_64-20250730-git-a6f3236"
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = r"googleCredentials.json"  # Update path as needed
 
 # Audio input config
 SAMPLE_RATE = 16000
 CHANNELS = 1
-CHUNK_DURATION_MS = 200
+CHUNK_DURATION_MS = 400
 FRAMES_PER_BUFFER = int(SAMPLE_RATE * CHUNK_DURATION_MS / 1000)
 
 # Voice & system prompt
-ELEVENLABS_VOICE_ID = "nbOs83cg1fbwnhG6tlRB"  # Use your own voice ID here
+ELEVENLABS_VOICE_ID = "nbOs83cg1fbwnhG6tlRB"
 SYSTEM_PROMPT = "You are a helpful voice assistant."
 
 # Initialize clients
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 elevenlabs_client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
-dg_client = DeepgramClient(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
 ############################
-# Deepgram STT Wrapper
+# Google STT Microphone Stream
 ############################
 
-class DeepgramSTT:
-    def __init__(self, on_transcript_callback):
-        self.dg = dg_client
-        self.connection = self.dg.listen.websocket.v("1")
-        self.on_transcript_callback = on_transcript_callback
-        self.setup_events()
+class MicrophoneStream:
+    def __init__(self, rate=SAMPLE_RATE, chunk=FRAMES_PER_BUFFER):
+        self._rate = rate
+        self._chunk = chunk
+        self._buff = queue.Queue()
+        self.closed = True
 
-    def setup_events(self):
-        self.connection.on(LiveTranscriptionEvents.Open, self.on_open)
-        self.connection.on(LiveTranscriptionEvents.Close, self.on_close)
-        self.connection.on(LiveTranscriptionEvents.Transcript, self.on_transcript)
-
-    def on_open(self, *args):
-        print("🟢 DEEPGRAM CONNECTION OPENED.")
-
-    def on_close(self, *args):
-        print("🔴 DEEPGRAM CONNECTION CLOSED.")
-
-    def on_transcript(self, _, result, **kwargs):
-        sentence = result.channel.alternatives[0].transcript
-        if sentence:
-            print(f"🗣️ YOU SAID: {sentence}")
-            self.on_transcript_callback(sentence)
-
-    def start_connection(self):
-        options = LiveOptions(
-            model="nova-3",
-            language="en-US",
-            punctuate=True,
-            encoding="linear16",
-            sample_rate=SAMPLE_RATE,
+    def __enter__(self):
+        self._audio_interface = pyaudio.PyAudio()
+        self._audio_stream = self._audio_interface.open(
+            format=pyaudio.paInt16,
             channels=1,
-            vad_events=True,
-            endpointing=800
+            rate=self._rate,
+            input=True,
+            frames_per_buffer=self._chunk,
+            stream_callback=self._fill_buffer,
         )
-        if not self.connection.start(options):
-            print("❌ FAILED TO START DEEPGRAM.")
-            return False
-        return True
+        self.closed = False
+        return self
 
-    def send_audio_data(self, data):
-        self.connection.send(data)
+    def __exit__(self, type, value, traceback):
+        self._audio_stream.stop_stream()
+        self._audio_stream.close()
+        self.closed = True
+        self._buff.put(None)
+        self._audio_interface.terminate()
 
-    def finish(self):
-        self.connection.finish()
-        print("✅ STT STREAM CLOSED.")
+    def _fill_buffer(self, in_data, frame_count, time_info, status_flags):
+        self._buff.put(in_data)
+        return None, pyaudio.paContinue
+
+    def generator(self):
+        while not self.closed:
+            chunk = self._buff.get()
+            if chunk is None:
+                return
+            yield chunk
 
 #########################
 # LLM + Streaming TTS
@@ -84,8 +79,8 @@ class DeepgramSTT:
 def get_llm_reply(conversation, result_dict):
     try:
         response = openai_client.chat.completions.create(
-            model="gpt-4.1-nano",
-            messages=conversation[-10:],  # Keep short context
+            model="gpt-4.1-mini",
+            messages=conversation[-10:],
             temperature=0.6,
             max_tokens=260,
         )
@@ -103,7 +98,7 @@ def speak_streaming(text):
             output_format="mp3_44100_128"
         )
         print("🔊 Streaming TTS playback started...")
-        stream(audio_stream)  # Play streamed audio chunk by chunk
+        stream(audio_stream)
         print("🔊 TTS playback complete.")
     except Exception as e:
         print("❌ TTS streaming error:", e)
@@ -144,36 +139,40 @@ def main():
 
         threading.Thread(target=run_tts_after_llm, daemon=True).start()
 
-    # Start Deepgram STT
-    dg_stt = DeepgramSTT(on_transcript)
-    if not dg_stt.start_connection():
-        return
+    # Google STT streaming logic
+    def google_stt_stream():
+        client = speech.SpeechClient()
+        config = speech.RecognitionConfig(
+            encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
+            sample_rate_hertz=SAMPLE_RATE,
+            language_code="en-US",
+        )
+        streaming_config = speech.StreamingRecognitionConfig(
+            config=config, interim_results=False
+        )
 
-    print("🟢 VoiceBot is running... Speak into your mic")
+        with MicrophoneStream(SAMPLE_RATE, FRAMES_PER_BUFFER) as stream:
+            audio_generator = stream.generator()
+            requests = (speech.StreamingRecognizeRequest(audio_content=content)
+                        for content in audio_generator)
+            responses = client.streaming_recognize(streaming_config, requests)
+            for response in responses:
+                if not response.results:
+                    continue
+                result = response.results[0]
+                if not result.alternatives:
+                    continue
+                transcript = result.alternatives[0].transcript
+                if result.is_final and transcript.strip():
+                    print(f"🗣️ YOU SAID: {transcript}")
+                    on_transcript(transcript)
+                if re.search(r"\b(exit|quit)\b", transcript, re.I):
+                    print("Exiting..")
+                    stop_event.set()
+                    break
 
-    def audio_input_stream():
-        def mic_callback(indata, frames, time_info, status):
-            if status:
-                print("⚠️ AUDIO STATUS:", status)
-            audio_data = (indata * 32767).astype(np.int16).tobytes()
-            dg_stt.send_audio_data(audio_data)
-
-        try:
-            with sd.InputStream(
-                channels=CHANNELS,
-                samplerate=SAMPLE_RATE,
-                callback=mic_callback,
-                blocksize=FRAMES_PER_BUFFER,
-                dtype="float32"
-            ):
-                stop_event.wait()
-        except Exception as e:
-            print("❌ Audio Error:", e)
-        finally:
-            dg_stt.finish()
-
-    mic_thread = threading.Thread(target=audio_input_stream)
-    mic_thread.start()
+    stt_thread = threading.Thread(target=google_stt_stream)
+    stt_thread.start()
 
     try:
         input("🔘 Press Enter to stop...\n")
@@ -181,7 +180,7 @@ def main():
         print("🛑 Manual Interrupt.")
     finally:
         stop_event.set()
-        mic_thread.join()
+        stt_thread.join()
         print("👋 VoiceBot shut down.")
 
 if __name__ == "__main__":

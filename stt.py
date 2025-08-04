@@ -1,72 +1,46 @@
-# Example filename: main.py
-
-import httpx
-import logging
-from deepgram.utils import verboselogs
-import threading
-import os
 from dotenv import load_dotenv
+import os
+from deepgram import DeepgramClient, LiveTranscriptionEvents, LiveOptions, Microphone
+
 load_dotenv()
-from deepgram import (
-    DeepgramClient,
-    DeepgramClientOptions,
-    LiveTranscriptionEvents,
-    LiveOptions,
-)
 
-# URL for the realtime streaming audio you would like to transcribe
-URL = "http://stream.live.vc.bbcmedia.co.uk/bbc_world_service"
+deepgram = DeepgramClient(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-def main():
+def speechRecognition():
     try:
-        # use default config
-        deepgram: DeepgramClient = DeepgramClient()
-
-        # Create a websocket connection to Deepgram
-        dg_connection = deepgram.listen.websocket.v("1")
+        dg_connection = deepgram.listen.live.v("1")
 
         def on_message(self, result, **kwargs):
             sentence = result.channel.alternatives[0].transcript
             if len(sentence) == 0:
                 return
-            print(f"speaker: {sentence}")
+            print(f"USER:\n {sentence}")
+
+        def on_error(self, error):
+            print(f"ERROR: Problem with transcription.\n {error}")
 
         dg_connection.on(LiveTranscriptionEvents.Transcript, on_message)
+        dg_connection.on(LiveTranscriptionEvents.Error, on_error)
 
-        # connect to websocket
-        options = LiveOptions(model="nova-3")
+        options = LiveOptions(
+            model="nova-3",
+            smart_format=True,
+            language="en-US",
+            encoding="linear16",
+            channels=1,
+            sample_rate=16000,
+        )
 
-        print("\n\nPress Enter to stop recording...\n\n")
-        if dg_connection.start(options) is False:
-            print("Failed to start connection")
-            return
+        dg_connection.start(options)
 
-        lock_exit = threading.Lock()
-        exit = False
+        microphone = Microphone(dg_connection.send)
+        microphone.start()
 
-        # define a worker thread
-        def myThread():
-            with httpx.stream("GET", URL) as r:
-                for data in r.iter_bytes():
-                    lock_exit.acquire()
-                    if exit:
-                        break
-                    lock_exit.release()
+        # Wait until finished
+        input("Press Enter to stop recording...\n\n")
 
-                    dg_connection.send(data)
-
-        # start the worker thread
-        myHttp = threading.Thread(target=myThread)
-        myHttp.start()
-
-        # signal finished
-        input("")
-        lock_exit.acquire()
-        exit = True
-        lock_exit.release()
-
-        # Wait for the HTTP thread to close and join
-        myHttp.join()
+        # Wait for the microphone to close
+        microphone.finish()
 
         # Indicate that we've finished
         dg_connection.finish()
@@ -74,8 +48,8 @@ def main():
         print("Finished")
 
     except Exception as e:
-        print(f"Could not open socket: {e}")
+        print(f"ERROR: Exception with transcription.\n {e}")
         return
 
 if __name__ == "__main__":
-    main()
+    speechRecognition()
