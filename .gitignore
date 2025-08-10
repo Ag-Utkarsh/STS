@@ -1,7 +1,5 @@
 .env
 config.ini
-demo_final.py
-demo_test.py
 prompt.txt
 lvenv/
 __pycache__/
@@ -11,3 +9,4 @@ Mockup/
 googleCredentials.json
 another_sts.py
 mpv.exe
+stt.py
