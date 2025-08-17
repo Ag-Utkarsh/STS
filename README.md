@@ -1,6 +1,6 @@
 # Voice_Bot: Real-Time Speech-to-Speech (STS) Assistant
 
-This project is a **real-time Speech-to-Speech (STS) VoiceBot** that listens to your voice, transcribes it using Google Speech-to-Text, generates a response with OpenAI GPT, and speaks the reply using ElevenLabs TTS.
+This project is a **real-time Speech-to-Speech (STS) VoiceBot** that listens to your voice, transcribes it using AssemblyAI (streaming STT), generates a response with OpenAI GPT, and speaks the reply using ElevenLabs TTS.
 
 ---
 
@@ -10,10 +10,10 @@ This project is a **real-time Speech-to-Speech (STS) VoiceBot** that listens to 
    Audio is captured in real time from your microphone using PyAudio.
 
 2. **Streaming Speech-to-Text (STT):**  
-   The audio stream is sent to Google Cloud Speech-to-Text, which transcribes your speech as you talk.
+   The audio stream is sent to AssemblyAI (streaming), which transcribes your speech as you talk.
 
 3. **Conversational AI (LLM):**  
-   The transcribed text is sent to OpenAI's GPT models (via API), which generate a short, crisp response.
+   The transcribed text is sent to OpenAI's GPT models (via API), which generate short, crisp responses.
 
 4. **Streaming Text-to-Speech (TTS):**  
    The response is sent to ElevenLabs, which streams back high-quality speech audio.
@@ -25,18 +25,16 @@ All steps are pipelined and multithreaded for low-latency, natural-feeling inter
 
 ---
 
-## Why Use Cloud APIs Instead of Open-Source Models?
+## Why AssemblyAI (instead of Google STT)
 
-My laptop is low-end and cannot run GPU-based open-source models efficiently.  
-By using Google, OpenAI, and ElevenLabs APIs, I achieve **very low latency** (2–4 seconds per interaction, and sometimes 1–2 seconds for short answers or after the system is warmed up).  
-This makes the experience much more responsive than running local models on limited hardware.
+Google STT was used previously but Google STT credits were exhausted and obtaining a replacement API key failed, so the project now uses AssemblyAI streaming STT. AssemblyAI provides a straightforward streaming API and maintains the low-latency behavior required for real-time interaction.
 
 ---
 
 ## Features
 
 - **Real-time microphone input** using PyAudio
-- **Streaming speech-to-text** with Google Cloud Speech-to-Text
+- **Streaming speech-to-text** with AssemblyAI
 - **Conversational AI** using OpenAI's GPT models
 - **Streaming text-to-speech** with ElevenLabs
 - **Multithreaded pipeline** for low-latency interaction
@@ -48,18 +46,18 @@ This makes the experience much more responsive than running local models on limi
 ## Requirements
 
 - Python 3.8+
-- Google Cloud service account credentials for STT
 - [OpenAI API key](https://platform.openai.com/)
 - [ElevenLabs API key](https://elevenlabs.io/)
+- AssemblyAI API key
 - `ffmpeg` (with `ffplay`) installed and available in your `PATH`
-- 'mpv' player
+- `mpv` player (optional)
 - Microphone
 
 ### Python Dependencies
 
 Install with pip:
 ```
-pip install sounddevice numpy python-dotenv openai elevenlabs google-cloud-speech pyaudio
+pip install sounddevice numpy python-dotenv openai elevenlabs assemblyai pyaudio
 ```
 
 ---
@@ -72,13 +70,12 @@ pip install sounddevice numpy python-dotenv openai elevenlabs google-cloud-speec
     ```
     OPENAI_API_KEY=your_openai_key
     ELEVENLABS_API_KEY=your_elevenlabs_key
+    ASSEMBLYAI_API_KEY=your_assemblyai_key
     ```
 
-3. **Place your Google Cloud credentials** file (e.g., `googleCredentials.json`) in the project root.
+3. **Ensure `ffplay` is available** (part of ffmpeg) and added to your `PATH`.
 
-4. **Ensure `ffplay` is available** (part of ffmpeg) and added to your `PATH`.
-
-5. **Run the bot:**
+4. **Run the bot:**
     ```bash
     python sts.py
     ```
@@ -96,17 +93,22 @@ pip install sounddevice numpy python-dotenv openai elevenlabs google-cloud-speec
 ## Current Limitations
 
 - **No mid-interruption handling:**  
-  The model cannot handle user interruptions while the bot is speaking. If you start talking while the bot is responding, it will not stop and listen.
+  The model cannot reliably handle user interruptions while the bot is speaking. If you start talking while the bot is responding, it may not stop and listen immediately.
+
 - **Silence triggers:**  
-  As soon as there is a small silence in your speech, the model assumes you are done and starts processing.
+  Small silences in user speech may be interpreted as end-of-turn and cause the model to start processing.
+
 - **No UI yet:**  
   Currently, the bot is terminal-based. A UI is planned for future versions.
+
+## How can the latency be reduced to 1s?
+   share your ideas
 
 ---
 
 ## Notes
 
-- **Latency:** The current pipeline achieves 2–4 seconds response time (1–2 seconds for short answers or after warm-up).
+- **Latency:** The current pipeline achieves 2–4 seconds response time (2 seconds for short answers or after warm-up).
 - **Feedback Loop:** Use headphones to avoid the bot picking up its own voice.
 - **Development:** This is a work-in-progress. Expect breaking changes and improvements.
 
@@ -116,7 +118,5 @@ pip install sounddevice numpy python-dotenv openai elevenlabs google-cloud-speec
 
 - **No audio output:** Ensure `ffplay` is installed and in your `PATH`.
 - **No response from bot:** Check your API keys, credentials, and microphone.
-- **Bot repeats itself:** Use headphones and check your input device settings.
-- **Google STT errors:** Make sure your Google credentials are valid and billing is enabled.
-
----
+- **Bot repeats itself / feedback:** Use headphones and check your input device settings.
+- **AssemblyAI STT errors:** Verify `ASSEMBLYAI_API_KEY` is set and valid; check network connectivity.

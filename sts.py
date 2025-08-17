@@ -6,58 +6,30 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from elevenlabs.client import ElevenLabs
 from elevenlabs import stream
-import pyaudio
-from google.cloud import speech
+import assemblyai as aai
+from assemblyai.streaming.v3 import (
+    StreamingClient,
+    StreamingClientOptions,
+    StreamingParameters,
+    StreamingEvents,
+    BeginEvent,
+    TurnEvent,
+    TerminationEvent,
+    StreamingError,
+)
 
-# Load environment variables
+# Load environment variables (API keys, etc.)
 load_dotenv()
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = r"googleCredentials.json"
+ASSEMBLYAI_API_KEY = os.getenv("ASSEMBLYAI_API_KEY")  # Set this in your .env
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 
 SAMPLE_RATE = 16000
-FRAMES_PER_BUFFER = int(SAMPLE_RATE * 400 / 1000)
-ELEVENLABS_VOICE_ID = "nbOs83cg1fbwnhG6tlRB"
+ELEVENLABS_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"
 SYSTEM_PROMPT = "You are a helpful assistant. Give short, crisp answers."
 
-openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-elevenlabs_client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
-
-class MicrophoneStream:
-    def __init__(self, rate=SAMPLE_RATE, chunk=FRAMES_PER_BUFFER):
-        self._rate = rate
-        self._chunk = chunk
-        self._buff = queue.Queue()
-        self.closed = True
-
-    def __enter__(self):
-        self._audio_interface = pyaudio.PyAudio()
-        self._audio_stream = self._audio_interface.open(
-            format=pyaudio.paInt16,
-            channels=1,
-            rate=self._rate,
-            input=True,
-            frames_per_buffer=self._chunk,
-            stream_callback=self._fill_buffer,
-        )
-        self.closed = False
-        return self
-
-    def __exit__(self, type, value, traceback):
-        self._audio_stream.stop_stream()
-        self._audio_stream.close()
-        self.closed = True
-        self._buff.put(None)
-        self._audio_interface.terminate()
-
-    def _fill_buffer(self, in_data, frame_count, time_info, status_flags):
-        self._buff.put(in_data)
-        return None, pyaudio.paContinue
-
-    def generator(self):
-        while not self.closed:
-            chunk = self._buff.get()
-            if chunk is None:
-                return
-            yield chunk
+openai_client = OpenAI(api_key=OPENAI_API_KEY)
+elevenlabs_client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
 
 def get_llm_reply_streaming(conversation, buffer_chars=50):
     buffer = ""
@@ -97,50 +69,59 @@ def main():
     conversation = [{"role": "system", "content": SYSTEM_PROMPT}]
     stop_event = threading.Event()
 
-    def on_transcript(sentence):
-        conversation.append({"role": "user", "content": sentence})
+    def on_transcript(transcript):
+        # Called when a transcript is received from AssemblyAI
+        conversation.append({"role": "user", "content": transcript})
+        print(f"YOU SAID: {transcript}")
         print("THINKING...")
-        # Stream LLM response in buffered chunks
+
         def run_tts_stream():
             for phrase in get_llm_reply_streaming(conversation):
                 print(f"\nBOT: {phrase}\n")
                 conversation.append({"role": "assistant", "content": phrase})
                 speak_streaming(phrase)
+
         threading.Thread(target=run_tts_stream, daemon=True).start()
 
-    def google_stt_stream():
-        client = speech.SpeechClient()
-        config = speech.RecognitionConfig(
-            encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-            sample_rate_hertz=SAMPLE_RATE,
-            language_code="en-US",
-        )
-        streaming_config = speech.StreamingRecognitionConfig(
-            config=config,
-            interim_results=False
-        )
-        with MicrophoneStream(SAMPLE_RATE, FRAMES_PER_BUFFER) as stream_mic:
-            audio_generator = stream_mic.generator()
-            requests = (speech.StreamingRecognizeRequest(audio_content=content)
-                        for content in audio_generator)
-            responses = client.streaming_recognize(streaming_config, requests)
-            for response in responses:
-                if not response.results:
-                    continue
-                result = response.results[0]
-                if not result.alternatives:
-                    continue
-                transcript = result.alternatives[0].transcript
-                if result.is_final and transcript.strip():
-                    print(f"YOU SAID: {transcript}")
-                    on_transcript(transcript)
-                if re.search(r"\b(exit|quit)\b", transcript, re.I):
-                    print("Exiting..")
-                    stop_event.set()
-                    break
+    client = StreamingClient(
+        StreamingClientOptions(api_key=ASSEMBLYAI_API_KEY)
+    )
 
-    stt_thread = threading.Thread(target=google_stt_stream)
+    def on_begin(self, event: BeginEvent):
+        print(f"Session started: {event.id}")
+
+    def on_turn(self, event: TurnEvent):
+    # Only act on the final, formatted transcript
+        if event.end_of_turn and getattr(event, 'turn_is_formatted', False) and event.transcript.strip():
+            print(f"Final transcript: {event.transcript}")
+            on_transcript(event.transcript)
+    # You may optionally print partial/unformatted here for debugging, but do not use them
+
+
+    def on_terminated(self, event: TerminationEvent):
+        print(f"Session terminated: {event.audio_duration_seconds} seconds of audio processed")
+        stop_event.set()
+
+    def on_error(self, error: StreamingError):
+        print(f"Error occurred: {error}")
+        stop_event.set()
+
+    # Register event handlers
+    client.on(StreamingEvents.Begin, on_begin)
+    client.on(StreamingEvents.Turn, on_turn)
+    client.on(StreamingEvents.Termination, on_terminated)
+    client.on(StreamingEvents.Error, on_error)
+
+    def stream_thread():
+        client.connect(StreamingParameters(sample_rate=SAMPLE_RATE, format_turns=True))
+        try:
+            client.stream(aai.extras.MicrophoneStream(sample_rate=SAMPLE_RATE))
+        finally:
+            client.disconnect(terminate=True)
+
+    stt_thread = threading.Thread(target=stream_thread)
     stt_thread.start()
+
     try:
         input("Press Enter to stop...\n")
     except KeyboardInterrupt:

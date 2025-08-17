@@ -1,55 +1,77 @@
-from dotenv import load_dotenv
-import os
-from deepgram import DeepgramClient, LiveTranscriptionEvents, LiveOptions, Microphone
+import logging
+from typing import Type
 
-load_dotenv()
+import assemblyai as aai
+from assemblyai.streaming.v3 import (
+    BeginEvent,
+    StreamingClient,
+    StreamingClientOptions,
+    StreamingError,
+    StreamingEvents,
+    StreamingParameters,
+    StreamingSessionParameters,
+    TerminationEvent,
+    TurnEvent,
+)
 
-deepgram = DeepgramClient(api_key=os.getenv("DEEPGRAM_API_KEY"))
+api_key = "xxxxxxxxxxx"
 
-def speechRecognition():
-    try:
-        dg_connection = deepgram.listen.live.v("1")
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-        def on_message(self, result, **kwargs):
-            sentence = result.channel.alternatives[0].transcript
-            if len(sentence) == 0:
-                return
-            print(f"USER:\n {sentence}")
 
-        def on_error(self, error):
-            print(f"ERROR: Problem with transcription.\n {error}")
+def on_begin(self: Type[StreamingClient], event: BeginEvent):
+    print(f"Session started: {event.id}")
 
-        dg_connection.on(LiveTranscriptionEvents.Transcript, on_message)
-        dg_connection.on(LiveTranscriptionEvents.Error, on_error)
 
-        options = LiveOptions(
-            model="nova-3",
-            smart_format=True,
-            language="en-US",
-            encoding="linear16",
-            channels=1,
-            sample_rate=16000,
+def on_turn(self: Type[StreamingClient], event: TurnEvent):
+    print(f"{event.transcript} ({event.end_of_turn})")
+
+    if event.end_of_turn and not event.turn_is_formatted:
+        params = StreamingSessionParameters(
+            format_turns=True,
         )
 
-        dg_connection.start(options)
+        self.set_params(params)
 
-        microphone = Microphone(dg_connection.send)
-        microphone.start()
 
-        # Wait until finished
-        input("Press Enter to stop recording...\n\n")
+def on_terminated(self: Type[StreamingClient], event: TerminationEvent):
+    print(
+        f"Session terminated: {event.audio_duration_seconds} seconds of audio processed"
+    )
 
-        # Wait for the microphone to close
-        microphone.finish()
 
-        # Indicate that we've finished
-        dg_connection.finish()
+def on_error(self: Type[StreamingClient], error: StreamingError):
+    print(f"Error occurred: {error}")
 
-        print("Finished")
 
-    except Exception as e:
-        print(f"ERROR: Exception with transcription.\n {e}")
-        return
+def main():
+    client = StreamingClient(
+        StreamingClientOptions(
+            api_key=api_key,
+            api_host="streaming.assemblyai.com",
+        )
+    )
+
+    client.on(StreamingEvents.Begin, on_begin)
+    client.on(StreamingEvents.Turn, on_turn)
+    client.on(StreamingEvents.Termination, on_terminated)
+    client.on(StreamingEvents.Error, on_error)
+
+    client.connect(
+        StreamingParameters(
+            sample_rate=16000,
+            format_turns=True,
+        )
+    )
+
+    try:
+        client.stream(
+          aai.extras.MicrophoneStream(sample_rate=16000)
+        )
+    finally:
+        client.disconnect(terminate=True)
+
 
 if __name__ == "__main__":
-    speechRecognition()
+    main()
