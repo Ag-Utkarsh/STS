@@ -61,6 +61,10 @@ GEMINI_API_KEY=your_gemini_key
 python sts.py
 ```
 
+### 5. Connect and test
+
+Open http://localhost:7860/client in your browser and click Connect(top right corner, and give the microphone permission) to start talking to your bot.
+
 ***
 
 ## Pipeline Structure
@@ -79,21 +83,6 @@ Pipeline(
     context_aggregator.assistant() # Aggregated assistant utterances
 )
 ```
-
-**Event-driven:** Handlers such as `on_client_connected` and `on_client_disconnected` orchestrate pipeline lifecycles.
-
-***
-
-## Pipecat Integration
-
-### Why Pipecat?
-
-- **Unified framework**: Simplifies connecting external APIs for STT, LLM, TTS, and audio transport.
-- **Observability**: Metrics, usage logging, and debuggability.
-- **Extensible**: Easily swap or add processors, support for custom modules.
-- **Built-in context aggregation**: For natural, memoryful conversations.
-
-> See the official [Pipecat Documentation](https://docs.pipecat.ai/) and [Quickstart Repo](https://github.com/pipecat-ai/pipecat-quickstart/tree/main) for additional setup, configuration, and API details.
 
 ***
 
