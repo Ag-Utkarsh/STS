@@ -3,4 +3,4 @@ lvenv/
 __pycache__/
 *.pyc
 wvenv/
-mpv.exe
+myvenv/

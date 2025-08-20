@@ -1,122 +1,123 @@
-# Voice_Bot: Real-Time Speech-to-Speech (STS) Assistant
+# Real-Time Speech-to-Speech (STS)
+***
 
-This project is a **real-time Speech-to-Speech (STS) VoiceBot** that listens to your voice, transcribes it using AssemblyAI (streaming STT), generates a response with OpenAI GPT, and speaks the reply using ElevenLabs TTS.
+## Overview
 
----
+This project delivers a **real-time speech-to-speech (STS) conversation model** using [Pipecat](https://docs.pipecat.ai/)—a powerful Python framework for AI pipelines—integrated with leading speech recognition, large language model (LLM), and text-to-speech (TTS) services. This solution supports fast, natural back-and-forth spoken dialogues with context awareness, VAD-based audio control, and streaming responses.
 
-## Pipeline Overview
+> *While we previously built a similar model by independently linking STT, LLM, and TTS modules (using separate threads to minimize latency). You can find our older architecture in the commit history for comparison.*
 
-1. **Microphone Input:**  
-   Audio is captured in real time from your microphone using PyAudio.
-
-2. **Streaming Speech-to-Text (STT):**  
-   The audio stream is sent to AssemblyAI (streaming), which transcribes your speech as you talk.
-
-3. **Conversational AI (LLM):**  
-   The transcribed text is sent to OpenAI's GPT models (via API), which generate short, crisp responses.
-
-4. **Streaming Text-to-Speech (TTS):**  
-   The response is sent to ElevenLabs, which streams back high-quality speech audio.
-
-5. **Audio Playback:**  
-   The bot's reply is played back to you immediately.
-
-All steps are pipelined and multithreaded for low-latency, natural-feeling interaction.
-
----
-
-## Why AssemblyAI (instead of Google STT)
-
-Google STT was used previously but Google STT credits were exhausted and obtaining a replacement API key failed, so the project now uses AssemblyAI streaming STT. AssemblyAI provides a straightforward streaming API and maintains the low-latency behavior required for real-time interaction.
-
----
+***
 
 ## Features
 
-- **Real-time microphone input** using PyAudio
-- **Streaming speech-to-text** with AssemblyAI
-- **Conversational AI** using OpenAI's GPT models
-- **Streaming text-to-speech** with ElevenLabs
-- **Multithreaded pipeline** for low-latency interaction
-- **Environment variable support** for API keys
-- **Works on Windows** (tested), should work on Mac/Linux with minor changes
+- **Real-time speech-to-speech interaction**: Users converse naturally, and the bot speaks responses instantly.
+- **Low-latency streaming**: Average response latency is ~2.5s, the first response takes time; the goal is to achieve ~1s latency for first outputs.
+- **Interruption handling**: Users can interrupt with new input, and the pipeline adapts its response.
+- **Dynamic context**: Maintains conversation flow using context aggregation.
+- **Modular Pipecat pipeline**: Simplifies complex integrations and provides observability.
+- **Pluggable components**:
+  - Deepgram for ASR (STT)
+  - Google Gemini LLM
+  - ElevenLabs for TTS
+  - Silero for VAD
+- **WebRTC-based audio transport** using SmallWebRTCTransport
+- **Voice user interface**: (UI to be improved—see current limitations)
 
----
+***
 
-## Requirements
+## Installation & Setup
 
-- Python 3.8+
-- [OpenAI API key](https://platform.openai.com/)
-- [ElevenLabs API key](https://elevenlabs.io/)
-- AssemblyAI API key
-- `ffmpeg` (with `ffplay`) installed and available in your `PATH`
-- `mpv` player (optional)
-- Microphone
+### 1. Clone the Repository
 
-### Python Dependencies
-
-Install with pip:
-```
-pip install sounddevice numpy python-dotenv openai elevenlabs assemblyai pyaudio
+```bash
+git clone https://github.com/Ag-Utkarsh/STS.git
+cd STS
 ```
 
----
+### 2. Install Dependencies
 
-## Setup
+> **Note:** It’s recommended to use a virtual environment.
 
-1. **Clone this repository** and enter the folder.
+```bash
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
 
-2. **Create a `.env` file** in the project root with your API keys:
-    ```
-    OPENAI_API_KEY=your_openai_key
-    ELEVENLABS_API_KEY=your_elevenlabs_key
-    ASSEMBLYAI_API_KEY=your_assemblyai_key
-    ```
+### 3. Environment Variables
 
-3. **Ensure `ffplay` is available** (part of ffmpeg) and added to your `PATH`.
+Create a `.env` file with your API keys:
 
-4. **Run the bot:**
-    ```bash
-    python sts.py
-    ```
+```dotenv
+DEEPGRAM_API_KEY=your_deepgram_key
+ELEVENLABS_API_KEY=your_elevenlabs_key
+GEMINI_API_KEY=your_gemini_key
+```
 
----
+### 4. Run the Bot
 
-## Usage
+```bash
+python sts.py
+```
 
-- Speak into your microphone.
-- The bot will transcribe, generate a reply, and speak back.
-- Type or press Enter in the terminal to stop the bot.
+***
 
----
+## Pipeline Structure
 
-## Current Limitations
+The speech-to-speech model is built using Pipecat’s pipeline abstraction, combining the following components:
 
-- **No mid-interruption handling:**  
-  The model cannot reliably handle user interruptions while the bot is speaking. If you start talking while the bot is responding, it may not stop and listen immediately.
+```python
+Pipeline(
+    transport.input(),          # Raw audio in from user
+    rtvi,                      # Real-time voice interaction processing
+    stt,                       # Speech-to-text (Deepgram)
+    context_aggregator.user(), # Aggregate LLM context (user side)
+    llm,                       # LLM (Google Gemini)
+    tts,                       # Text-to-speech (ElevenLabs)
+    transport.output(),        # Audio back to user
+    context_aggregator.assistant() # Aggregated assistant utterances
+)
+```
 
-- **Silence triggers:**  
-  Small silences in user speech may be interpreted as end-of-turn and cause the model to start processing.
+**Event-driven:** Handlers such as `on_client_connected` and `on_client_disconnected` orchestrate pipeline lifecycles.
 
-- **No UI yet:**  
-  Currently, the bot is terminal-based. A UI is planned for future versions.
+***
 
-## How can the latency be reduced to 1s?
-   share your ideas
+## Pipecat Integration
 
----
+### Why Pipecat?
 
-## Notes
+- **Unified framework**: Simplifies connecting external APIs for STT, LLM, TTS, and audio transport.
+- **Observability**: Metrics, usage logging, and debuggability.
+- **Extensible**: Easily swap or add processors, support for custom modules.
+- **Built-in context aggregation**: For natural, memoryful conversations.
 
-- **Latency:** The current pipeline achieves 2–4 seconds response time (2 seconds for short answers or after warm-up).
-- **Feedback Loop:** Use headphones to avoid the bot picking up its own voice.
-- **Development:** This is a work-in-progress. Expect breaking changes and improvements.
+> See the official [Pipecat Documentation](https://docs.pipecat.ai/) and [Quickstart Repo](https://github.com/pipecat-ai/pipecat-quickstart/tree/main) for additional setup, configuration, and API details.
 
----
+***
 
-## Troubleshooting
+## Current Limitations & Roadmap
 
-- **No audio output:** Ensure `ffplay` is installed and in your `PATH`.
-- **No response from bot:** Check your API keys, credentials, and microphone.
-- **Bot repeats itself / feedback:** Use headphones and check your input device settings.
-- **AssemblyAI STT errors:** Verify `ASSEMBLYAI_API_KEY` is set and valid; check network connectivity.
+- **Custom UI Needed**: While audio interaction works, a polished **voice UI kit** or frontend is still pending. Refer to community kits for inspiration.
+- **First sentence control**: At present, customizing the bot’s first utterance is limited; Pipecat’s system prompt currently manages this.
+- **Latency**: Average response latency is 2.5s at current configuration. Target: sub-1s response time for optimal interactivity.
+- **First Message**: Don't have control over the first message.
+
+***
+
+## Contribution & Feedback
+
+If you have ideas for improving the UI, reducing latency, or adding new integrations, contributions are welcome!.
+
+***
+
+## References
+
+- [Pipecat Documentation](https://docs.pipecat.ai/)
+- [Pipecat Quickstart](https://github.com/pipecat-ai/pipecat-quickstart/tree/main)
+- Deepgram, ElevenLabs, Google Gemini API guides
+
+***
+
+**Give it a try—your voice assistant is now just a conversation away!**
