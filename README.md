@@ -5,7 +5,7 @@
 
 This project delivers a **real-time speech-to-speech (STS) conversation model** using [Pipecat](https://docs.pipecat.ai/)—a powerful Python framework for AI pipelines—integrated with leading speech recognition, large language model (LLM), and text-to-speech (TTS) services. This solution supports fast, natural back-and-forth spoken dialogues with context awareness, VAD-based audio control, and streaming responses.
 
-> *While we previously built a similar model by independently linking STT, LLM, and TTS modules (using separate threads to minimize latency). You can find our older architecture in the commit history for comparison.*
+*While I previously built a similar model by independently linking STT, LLM, and TTS modules. You can find the older architecture in the commit history for understanding.*
 
 ***
 
