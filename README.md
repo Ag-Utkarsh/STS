@@ -9,6 +9,15 @@ This project delivers a **real-time speech-to-speech (STS) conversation model** 
 
 ***
 
+## Demo
+
+Watch a quick demo of the model in action:
+[![](demo.mp4)](demo.mp4)
+
+<video src="demo.mp4" controls width="600"></video>
+
+***
+
 ## Features
 
 - **Real-time speech-to-speech interaction**: Users converse naturally, and the bot speaks responses instantly.
