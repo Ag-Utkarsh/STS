@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 wvenv/
 myvenv/
+client/node_modules/
